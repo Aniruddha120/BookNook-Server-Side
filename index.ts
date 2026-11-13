@@ -4,6 +4,15 @@ import cors from "cors";
 import { Db, MongoClient, ObjectId } from "mongodb";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
+interface BookInput {
+  title: string;
+  author: string;
+  category: string;
+  image: string;
+  description: string;
+  totalCopies: number;
+}
+
 interface AuthUser {
   id: string;
   email: string;
@@ -91,6 +100,37 @@ app.get("/books/:id", async (req: Request, res: Response) => {
     res.send(book);
   } catch (error) {
     res.status(500).send({ message: "Could not load the book" });
+  }
+});
+
+app.post("/books", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { title, author, category, image, description, totalCopies } =
+      req.body as BookInput;
+
+    if (!title || !author || !category || !image || !description) {
+      return res.status(400).send({ message: "Please fill in every field" });
+    }
+
+    const copies = Number(totalCopies) || 1;
+
+    const book = {
+      title,
+      author,
+      category,
+      image,
+      description,
+      totalCopies: copies,
+      copies,
+      userEmail: req.user?.email,
+      userName: req.user?.name,
+      createdAt: new Date(),
+    };
+
+    const result = await db.collection("books").insertOne(book);
+    res.status(201).send({ ...book, _id: result.insertedId });
+  } catch (error) {
+    res.status(500).send({ message: "Could not add the book" });
   }
 });
 
