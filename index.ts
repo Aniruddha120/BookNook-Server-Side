@@ -134,6 +134,75 @@ app.post("/books", requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+app.patch("/books/:id", requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).send({ message: "Invalid book id" });
+    }
+
+    const id = new ObjectId(req.params.id);
+    const book = await db.collection("books").findOne({ _id: id });
+
+    if (!book) {
+      return res.status(404).send({ message: "Book not found" });
+    }
+
+    if (book.userEmail !== req.user?.email) {
+      return res.status(403).send({ message: "You can only edit your own books" });
+    }
+
+    const { title, author, category, image, description, totalCopies } =
+      req.body as BookInput;
+
+    const copies = Number(totalCopies) || book.totalCopies;
+    const borrowed = book.totalCopies - book.copies;
+
+    await db.collection("books").updateOne(
+      { _id: id },
+      {
+        $set: {
+          title,
+          author,
+          category,
+          image,
+          description,
+          totalCopies: copies,
+          copies: Math.max(copies - borrowed, 0),
+        },
+      }
+    );
+
+    const updated = await db.collection("books").findOne({ _id: id });
+    res.send(updated);
+  } catch (error) {
+    res.status(500).send({ message: "Could not update the book" });
+  }
+});
+
+app.delete("/books/:id", requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).send({ message: "Invalid book id" });
+    }
+
+    const id = new ObjectId(req.params.id);
+    const book = await db.collection("books").findOne({ _id: id });
+
+    if (!book) {
+      return res.status(404).send({ message: "Book not found" });
+    }
+
+    if (book.userEmail !== req.user?.email) {
+      return res.status(403).send({ message: "You can only delete your own books" });
+    }
+
+    await db.collection("books").deleteOne({ _id: id });
+    res.send({ message: "Book deleted" });
+  } catch (error) {
+    res.status(500).send({ message: "Could not delete the book" });
+  }
+});
+
 const port = process.env.PORT || 5000;
 
 connectDb()
