@@ -203,6 +203,96 @@ app.delete("/books/:id", requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+app.post("/borrows", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { bookId } = req.body as { bookId: string };
+
+    if (!bookId || !ObjectId.isValid(bookId)) {
+      return res.status(400).send({ message: "Invalid book id" });
+    }
+
+    const id = new ObjectId(bookId);
+    const book = await db.collection("books").findOne({ _id: id });
+
+    if (!book) {
+      return res.status(404).send({ message: "Book not found" });
+    }
+
+    if (book.copies < 1) {
+      return res.status(400).send({ message: "This book is not available right now" });
+    }
+
+    const existing = await db
+      .collection("borrows")
+      .findOne({ bookId: id, userEmail: req.user?.email });
+
+    if (existing) {
+      return res.status(400).send({ message: "You already borrowed this book" });
+    }
+
+    const borrowDate = new Date();
+    const returnDate = new Date();
+    returnDate.setDate(borrowDate.getDate() + 7);
+
+    const borrow = {
+      bookId: id,
+      bookTitle: book.title,
+      bookImage: book.image,
+      userEmail: req.user?.email,
+      borrowDate,
+      returnDate,
+    };
+
+    const result = await db.collection("borrows").insertOne(borrow);
+    await db.collection("books").updateOne({ _id: id }, { $inc: { copies: -1 } });
+
+    res.status(201).send({ ...borrow, _id: result.insertedId });
+  } catch (error) {
+    res.status(500).send({ message: "Could not borrow the book" });
+  }
+});
+
+app.get("/borrows", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const borrows = await db
+      .collection("borrows")
+      .find({ userEmail: req.user?.email })
+      .sort({ borrowDate: -1 })
+      .toArray();
+    res.send(borrows);
+  } catch (error) {
+    res.status(500).send({ message: "Could not load your borrows" });
+  }
+});
+
+app.delete("/borrows/:id", requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).send({ message: "Invalid borrow id" });
+    }
+
+    const id = new ObjectId(req.params.id);
+    const borrow = await db.collection("borrows").findOne({ _id: id });
+
+    if (!borrow) {
+      return res.status(404).send({ message: "Borrow not found" });
+    }
+
+    if (borrow.userEmail !== req.user?.email) {
+      return res.status(403).send({ message: "You can only return your own books" });
+    }
+
+    await db.collection("borrows").deleteOne({ _id: id });
+    await db
+      .collection("books")
+      .updateOne({ _id: borrow.bookId }, { $inc: { copies: 1 } });
+
+    res.send({ message: "Book returned" });
+  } catch (error) {
+    res.status(500).send({ message: "Could not return the book" });
+  }
+});
+
 const port = process.env.PORT || 5000;
 
 connectDb()
