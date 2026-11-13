@@ -1,7 +1,22 @@
 import "dotenv/config";
-import express, { Request, Response } from "express";
+import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
 import { Db, MongoClient, ObjectId } from "mongodb";
+import { createRemoteJWKSet, jwtVerify } from "jose";
+
+interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      user?: AuthUser;
+    }
+  }
+}
 
 const app = express();
 app.use(cors());
@@ -9,8 +24,33 @@ app.use(express.json());
 
 const client = new MongoClient(process.env.MONGO_URI || "mongodb://127.0.0.1:27017");
 const dbName = process.env.DB_NAME || "booknook";
+const clientUrl = process.env.CLIENT_URL || "http://localhost:3000";
 
 let db: Db;
+
+const jwks = createRemoteJWKSet(new URL(`${clientUrl}/api/auth/jwks`));
+
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+
+  if (!token) {
+    return res.status(401).send({ message: "You must be logged in" });
+  }
+
+  jwtVerify(token, jwks, { issuer: "booknook", audience: "booknook-api" })
+    .then(({ payload }) => {
+      req.user = {
+        id: String(payload.sub),
+        email: String(payload.email),
+        name: String(payload.name),
+      };
+      next();
+    })
+    .catch(() => {
+      res.status(401).send({ message: "Invalid or expired token" });
+    });
+}
 
 async function connectDb() {
   await client.connect();
